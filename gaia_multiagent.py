@@ -8,7 +8,8 @@ import pandas as pd
 from dotenv import load_dotenv
 import datasets
 from huggingface_hub import login
-from transformers.agents import ReactCodeAgent, ReactJsonAgent, HfApiEngine
+from transformers import pipeline
+from transformers.agents import ReactCodeAgent, ReactJsonAgent, HfApiEngine, TransformersEngine
 from transformers.agents.agents import DEFAULT_REACT_JSON_SYSTEM_PROMPT
 from transformers.agents.default_tools import Tool, PythonInterpreterTool
 from transformers.agents.llm_engine import MessageRole
@@ -35,14 +36,13 @@ login(os.getenv("HUGGINGFACEHUB_API_TOKEN"))
 print("Make sure you deactivated Tailscale VPN, else some URLs will be blocked!")
 
 OUTPUT_DIR = "output"
-USE_OPEN_MODELS = False
+USE_OPEN_MODELS = True
+LOCAL_ENGINE = True
 USE_JSON = False
 
 SET = "validation"
 
-# proprietary_llm_engine = AnthropicEngine(use_bedrock=True)
-proprietary_llm_engine = AnthropicEngine()
-
+repo_id_qwen = "Qwen/Qwen2.5-72B-Instruct"
 repo_id_llama3 = "meta-llama/Meta-Llama-3-70B-Instruct"
 repo_id_command_r = "CohereForAI/c4ai-command-r-plus"
 repo_id_gemma2 = "google/gemma-2-27b-it"
@@ -51,7 +51,9 @@ repo_id_llama = "meta-llama/Meta-Llama-3.1-70B-Instruct"
 REPO_ID_OS_MODEL = repo_id_llama
 ### LOAD EVALUATION DATASET
 
-eval_ds = datasets.load_dataset("gaia-benchmark/GAIA", "2023_all")[SET]
+# eval_ds = datasets.load_dataset("gaia-benchmark/GAIA", "2023_all")[SET]
+eval_ds = datasets.load_dataset("gaia-benchmark/GAIA", "2023_all")[SET].select(range(2))
+
 eval_ds = eval_ds.rename_columns(
     {"Question": "question", "Final answer": "true_answer", "Level": "task"}
 )
@@ -73,10 +75,23 @@ print(pd.Series(eval_ds["task"]).value_counts())
 
 # Replace with OAI if needed
 if USE_OPEN_MODELS:
-    websurfer_llm_engine = HfApiEngine(
-        model=REPO_ID_OS_MODEL,
-    )  # chosen for its high context length
+    if LOCAL_ENGINE:
+        websurfer_llm_engine = TransformersEngine(
+            pipeline(
+                model="Qwen/Qwen2.5-72B-Instruct",
+                # assistant_model="Qwen/Qwen2.5-0.5B-Instruct", 
+                # assistant_model="Qwen/Qwen2.5-1.5B-Instruct", 
+                torch_dtype="bfloat16",
+                device_map="auto",
+                )
+            )
+    else:
+        websurfer_llm_engine = HfApiEngine(
+            model=REPO_ID_OS_MODEL,
+        )  # chosen for its high context length
 else:
+    proprietary_llm_engine = AnthropicEngine(use_bedrock=True)
+    proprietary_llm_engine = AnthropicEngine()
     websurfer_llm_engine = proprietary_llm_engine
 
 ### BUILD AGENTS & TOOLS
@@ -212,7 +227,8 @@ TASK_SOLVING_TOOLBOX = [
 if USE_JSON:
     TASK_SOLVING_TOOLBOX.append(PythonInterpreterTool())
 
-hf_llm_engine = HfApiEngine(model=REPO_ID_OS_MODEL)
+# hf_llm_engine = HfApiEngine(model=REPO_ID_OS_MODEL)
+hf_llm_engine = websurfer_llm_engine
 
 llm_engine = hf_llm_engine if USE_OPEN_MODELS else proprietary_llm_engine
 
