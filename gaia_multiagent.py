@@ -42,13 +42,19 @@ USE_JSON = False
 
 SET = "validation"
 
-repo_id_qwen = "Qwen/Qwen2.5-72B-Instruct"
+repo_id_qwen72 = "Qwen/Qwen2.5-72B-Instruct"
 repo_id_llama3 = "meta-llama/Meta-Llama-3-70B-Instruct"
 repo_id_command_r = "CohereForAI/c4ai-command-r-plus"
 repo_id_gemma2 = "google/gemma-2-27b-it"
 repo_id_llama = "meta-llama/Meta-Llama-3.1-70B-Instruct"
 
-REPO_ID_OS_MODEL = repo_id_llama
+repo_id_qwen05 = "Qwen/Qwen2.5-0.5B-Instruct"
+repo_id_qwen15 = "Qwen/Qwen2.5-1.5B-Instruct"
+
+REPO_ID_OS_ASSISTANT_MODEL="Qwen/Qwen2.5-0.5B-Instruct"
+REPO_ID_OS_MODEL = repo_id_qwen15
+
+
 ### LOAD EVALUATION DATASET
 
 # eval_ds = datasets.load_dataset("gaia-benchmark/GAIA", "2023_all")[SET]
@@ -78,9 +84,8 @@ if USE_OPEN_MODELS:
     if LOCAL_ENGINE:
         websurfer_llm_engine = TransformersEngine(
             pipeline(
-                model="Qwen/Qwen2.5-72B-Instruct",
-                # assistant_model="Qwen/Qwen2.5-0.5B-Instruct", 
-                # assistant_model="Qwen/Qwen2.5-1.5B-Instruct", 
+                model=REPO_ID_OS_MODEL,
+                # assistant_model=REPO_ID_OS_ASSISTANT_MODEL, 
                 torch_dtype="bfloat16",
                 device_map="auto",
                 )
@@ -294,13 +299,19 @@ async def call_transformers(agent, question: str, **kwargs) -> str:
         ],
     }
 
+from time import perf_counter
 
+start_time = perf_counter()
 results = asyncio.run(answer_questions(
     eval_ds,
     react_agent,
-    "react_code_claude_sonnet_28-10_managedagent-summary_planning",
+    "qwen2.5-0.5b",
     output_folder=f"{OUTPUT_DIR}/{SET}",
     agent_call_function=call_transformers,
     visual_inspection_tool = VisualQAGPT4Tool(),
     text_inspector_tool = ti_tool,
 ))
+
+print(f"Elapsed time: {perf_counter() - start_time} seconds")
+print(f"\n{hf_llm_engine.pipeline.model=}")
+print(f"\n{hf_llm_engine.pipeline.assistant_model=}")
