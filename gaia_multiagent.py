@@ -1,6 +1,6 @@
 # THIS IS EXPERIMENTAL! IT RELIES ON A NON-YET-MERGED BRANCH OF TRANFORMERS? IT WONT WORK OUT OF THE BOX.
 
-
+import argparse
 import asyncio
 import os
 from typing import Optional
@@ -42,23 +42,27 @@ USE_JSON = False
 
 SET = "validation"
 
-repo_id_qwen72 = "Qwen/Qwen2.5-72B-Instruct"
-repo_id_llama3 = "meta-llama/Meta-Llama-3-70B-Instruct"
-repo_id_command_r = "CohereForAI/c4ai-command-r-plus"
-repo_id_gemma2 = "google/gemma-2-27b-it"
-repo_id_llama = "meta-llama/Meta-Llama-3.1-70B-Instruct"
+parser = argparse.ArgumentParser(description="GAIA Multi-Agent Script")
+parser.add_argument('--model', type=str, default="Qwen/Qwen2.5-72B-Instruct", help='OS model repository ID')
+parser.add_argument('--assistant_model', type=str, default=None, help='Assistant model repository ID')
+parser.add_argument('--num_examples', type=int, default=None, help='Number of examples to evaluate')
+args = parser.parse_args()
 
-repo_id_qwen05 = "Qwen/Qwen2.5-0.5B-Instruct"
-repo_id_qwen15 = "Qwen/Qwen2.5-1.5B-Instruct"
+# repo_id_qwen72 = "Qwen/Qwen2.5-72B-Instruct"
+# repo_id_qwen05 = "Qwen/Qwen2.5-0.5B-Instruct"
+# repo_id_qwen15 = "Qwen/Qwen2.5-1.5B-Instruct"
 
-REPO_ID_OS_ASSISTANT_MODEL="Qwen/Qwen2.5-0.5B-Instruct"
-REPO_ID_OS_MODEL = repo_id_qwen15
+agent_name = f"{args.model.split('/')[-1]}"
+if args.assistant_model is not None:
+    agent_name += f"__assistant={args.assistant_model.split('/')[-1]}"
 
 
 ### LOAD EVALUATION DATASET
 
-# eval_ds = datasets.load_dataset("gaia-benchmark/GAIA", "2023_all")[SET]
-eval_ds = datasets.load_dataset("gaia-benchmark/GAIA", "2023_all")[SET].select(range(2))
+eval_ds = datasets.load_dataset("gaia-benchmark/GAIA", "2023_all")[SET]
+
+if args.num_examples is not None:
+    eval_ds = eval_ds.select(range(args.num_examples))
 
 eval_ds = eval_ds.rename_columns(
     {"Question": "question", "Final answer": "true_answer", "Level": "task"}
@@ -84,15 +88,15 @@ if USE_OPEN_MODELS:
     if LOCAL_ENGINE:
         websurfer_llm_engine = TransformersEngine(
             pipeline(
-                model=REPO_ID_OS_MODEL,
-                # assistant_model=REPO_ID_OS_ASSISTANT_MODEL, 
+                model=args.model,
+                assistant_model=args.assistant_model, 
                 torch_dtype="bfloat16",
                 device_map="auto",
                 )
             )
     else:
         websurfer_llm_engine = HfApiEngine(
-            model=REPO_ID_OS_MODEL,
+            model=args.model,
         )  # chosen for its high context length
 else:
     proprietary_llm_engine = AnthropicEngine(use_bedrock=True)
@@ -199,7 +203,7 @@ This tool handles the following file extensions: [".html", ".htm", ".xlsx", ".pp
 surfer_agent = ReactJsonAgent(
     llm_engine=websurfer_llm_engine,
     tools=WEB_TOOLS,
-    max_iterations=10,
+    max_iterations=2,
     verbose=2,
     # grammar = DEFAULT_JSONAGENT_REGEX_GRAMMAR,
     system_prompt=DEFAULT_REACT_JSON_SYSTEM_PROMPT,
@@ -224,8 +228,11 @@ Additionally, if after some searching you find out that you need more informatio
 
 ti_tool = TextInspectorTool()
 
+visual_qa_tool = VisualQATool()
+
 TASK_SOLVING_TOOLBOX = [
-    visualizer,  # VisualQATool(),
+    # visualizer, 
+    visual_qa_tool,
     ti_tool,
 ]
 
@@ -240,8 +247,8 @@ llm_engine = hf_llm_engine if USE_OPEN_MODELS else proprietary_llm_engine
 react_agent = ReactCodeAgent(
     llm_engine=llm_engine,
     tools=TASK_SOLVING_TOOLBOX,
-    max_iterations=12,
-    verbose=0,
+    max_iterations=2,
+    verbose=2,
     # grammar=DEFAULT_CODEAGENT_REGEX_GRAMMAR,
     additional_authorized_imports=[
         "requests",
@@ -277,7 +284,7 @@ if USE_JSON:
     react_agent = ReactJsonAgent(
         llm_engine=llm_engine,
         tools=TASK_SOLVING_TOOLBOX,
-        max_iterations=12,
+        max_iterations=2,
         verbose=0,
     )
 
@@ -305,13 +312,15 @@ start_time = perf_counter()
 results = asyncio.run(answer_questions(
     eval_ds,
     react_agent,
-    "qwen2.5-0.5b",
+    agent_name=agent_name,
     output_folder=f"{OUTPUT_DIR}/{SET}",
     agent_call_function=call_transformers,
-    visual_inspection_tool = VisualQAGPT4Tool(),
-    text_inspector_tool = ti_tool,
+    visual_inspection_tool=visual_qa_tool, # VisualQAGPT4Tool()
+    text_inspector_tool=ti_tool,
 ))
 
-print(f"Elapsed time: {perf_counter() - start_time} seconds")
-print(f"\n{hf_llm_engine.pipeline.model=}")
-print(f"\n{hf_llm_engine.pipeline.assistant_model=}")
+elapsed = perf_counter() - start_time
+print(f"Elapsed time: {elapsed} seconds")
+
+with open(f"output/validation/{agent_name}-latency.jsonl", "w") as f:
+    f.write(f"Elapsed time: {elapsed} seconds\n")
